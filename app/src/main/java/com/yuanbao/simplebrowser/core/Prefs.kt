@@ -59,6 +59,26 @@ object UaPresets {
     fun desktopUa(): String = CHROME_WINDOWS
 }
 
+data class SettingsState(
+    val ua: String?,
+    val javascript: Boolean,
+    val desktop: Boolean,
+    val homeUrl: String,
+    val searchTemplate: String,
+    val maxTasks: Int,
+    val partsPerTask: Int
+)
+
+fun Prefs.snapshot(systemUa: String?): SettingsState = SettingsState(
+    ua = resolveUa(systemUa),
+    javascript = javascript,
+    desktop = desktop,
+    homeUrl = homeUrl(),
+    searchTemplate = searchTemplate(),
+    maxTasks = maxTasks,
+    partsPerTask = partsPerTask
+)
+
 class Prefs(context: Context) {
 
     private val sp = context.applicationContext

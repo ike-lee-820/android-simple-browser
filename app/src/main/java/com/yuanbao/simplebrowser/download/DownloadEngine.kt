@@ -125,6 +125,22 @@ object DownloadEngine {
         return id
     }
 
+    fun onConfigChanged(context: Context) {
+        ensure(context)
+        val waiting = db().downloads()
+            .filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.FAILED }
+            .map { it.id }
+        synchronized(pending) {
+            waiting.forEach { id ->
+                if (!pending.contains(id) && !runningIds.contains(id) && !pausedIds.contains(id)) {
+                    pending.add(id)
+                }
+            }
+        }
+        pump(context)
+        notifyChanged()
+    }
+
     fun pause(id: Long) {
         pausedIds.add(id)
         activeCalls[id]?.forEach { runCatching { it.cancel() } }

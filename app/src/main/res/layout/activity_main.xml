@@ -53,6 +53,18 @@
                     android:text="@string/go"
                     android:textSize="12sp" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTabs"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:contentDescription="@string/tabs"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:minWidth="0dp"
+                    android:padding="0dp"
+                    android:textSize="13sp" />
+
                 <ImageButton
                     android:id="@+id/btnPin"
                     android:layout_width="36dp"
@@ -66,6 +78,13 @@
                     app:tint="?attr/colorControlNormal" />
             </LinearLayout>
 
+            <View
+                android:id="@+id/privateIndicator"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:background="@color/private_bar"
+                android:visibility="gone" />
+
             <com.google.android.material.progressindicator.LinearProgressIndicator
                 android:id="@+id/progress"
                 android:layout_width="match_parent"
@@ -75,8 +94,8 @@
                 app:trackThickness="2dp" />
         </com.google.android.material.appbar.AppBarLayout>
 
-        <WebView
-            android:id="@+id/webView"
+        <FrameLayout
+            android:id="@+id/webContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />

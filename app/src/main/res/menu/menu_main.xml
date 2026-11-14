@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/menu_new_tab" android:title="@string/new_tab" />
+    <item android:id="@+id/menu_new_private_tab" android:title="@string/new_private_tab" />
+    <item android:id="@+id/menu_tabs" android:title="@string/tabs" />
     <item android:id="@+id/menu_add_bookmark" android:title="@string/menu_add_bookmark" />
     <item android:id="@+id/menu_bookmarks" android:title="@string/menu_bookmarks" />
     <item android:id="@+id/menu_history" android:title="@string/menu_history" />

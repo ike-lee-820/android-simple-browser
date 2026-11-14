@@ -12,6 +12,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.CookieManager
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.URLUtil
@@ -21,9 +22,11 @@ import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,7 +39,11 @@ import com.yuanbao.simplebrowser.core.BrowserDb
 import com.yuanbao.simplebrowser.core.DomainGuard
 import com.yuanbao.simplebrowser.core.Prefs
 import com.yuanbao.simplebrowser.core.SearchEngines
+import com.yuanbao.simplebrowser.core.SettingsState
+import com.yuanbao.simplebrowser.core.snapshot
 import com.yuanbao.simplebrowser.databinding.ActivityMainBinding
+import com.yuanbao.simplebrowser.databinding.DialogTabsBinding
+import com.yuanbao.simplebrowser.databinding.ItemTabBinding
 import com.yuanbao.simplebrowser.download.DownloadEngine
 import com.yuanbao.simplebrowser.download.DownloadsActivity
 import com.yuanbao.simplebrowser.ui.RecordsActivity
@@ -44,12 +51,23 @@ import com.yuanbao.simplebrowser.ui.SettingsActivity
 
 class MainActivity : AppCompatActivity() {
 
+    private data class BrowserTab(
+        val id: Long,
+        val isPrivate: Boolean,
+        val webView: WebView,
+        var url: String = "",
+        var title: String = ""
+    )
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: Prefs
     private lateinit var db: BrowserDb
 
+    private val tabs = ArrayList<BrowserTab>()
+    private var nextTabId = 1L
+    private var currentTabId = -1L
     private var systemUa: String? = null
-    private var appliedUa: String? = null
+    private var lastSettings: SettingsState? = null
     private var lastBackTime = 0L
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
@@ -74,7 +92,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private val settingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val previous = lastSettings
+                applySettingsAll()
+                // WebSettings 的变更对已加载页面不会立即生效，强制刷新每个标签页。
+                tabs.forEach { it.webView.reload() }
+                val state = lastSettings
+                if (previous != null && state != null && previous.homeUrl != state.homeUrl) {
+                    snack(R.string.home_updated)
+                } else {
+                    snack(R.string.settings_applied)
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -85,75 +118,202 @@ class MainActivity : AppCompatActivity() {
         DownloadEngine.init(this)
         DomainGuard.restore(prefs.pinnedBase)
 
-        setupWebView()
         setupActions()
         setupBackHandling()
-        syncPinButton()
 
         val incoming = intent?.data?.toString()
-        if (savedInstanceState == null) {
-            loadUrl(if (!incoming.isNullOrEmpty()) incoming else prefs.homeUrl())
-        } else {
-            binding.webView.restoreState(savedInstanceState)
-            binding.etAddress.setText(binding.webView.url ?: "")
-        }
+        val startUrl = savedInstanceState?.getString("current_url")
+            ?: incoming
+            ?: prefs.homeUrl()
+        addTab(isPrivate = false, url = startUrl)
+        applySettingsAll()
+        syncPinButton()
     }
 
     override fun onResume() {
         super.onResume()
-        if (::binding.isInitialized && ::prefs.isInitialized && applySettings()) {
-            binding.webView.reload()
+        if (::binding.isInitialized && tabs.isNotEmpty()) {
+            applySettingsAll()
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.data?.toString()?.let { loadUrl(it) }
+        intent.data?.toString()?.let { addTab(isPrivate = false, url = it) }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        if (::binding.isInitialized) binding.webView.saveState(outState)
+        outState.putString("current_url", currentTab()?.url ?: prefs.homeUrl())
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        val ws = binding.webView.settings
-        systemUa = ws.userAgentString
-        applySettings()
-        ws.domStorageEnabled = true
-        ws.setSupportZoom(true)
-        ws.builtInZoomControls = true
-        ws.displayZoomControls = false
-        ws.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-        ws.cacheMode = WebSettings.LOAD_DEFAULT
-        ws.allowFileAccess = true
-        ws.javaScriptCanOpenWindowsAutomatically = true
-        ws.setSupportMultipleWindows(true)
+    // ---------- 标签页 ----------
 
-        binding.webView.webViewClient = createClient()
-        binding.webView.webChromeClient = createChromeClient()
-        binding.webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+    private fun currentTab(): BrowserTab? = tabs.firstOrNull { it.id == currentTabId }
+
+    private fun tabOf(view: WebView): BrowserTab? = tabs.firstOrNull { it.webView === view }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createWebView(isPrivate: Boolean): WebView {
+        val wv = WebView(this)
+        if (systemUa == null) systemUa = wv.settings.userAgentString
+        wv.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        applyTo(wv, prefs.snapshot(systemUa), isPrivate)
+        wv.settings.apply {
+            domStorageEnabled = true
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            allowFileAccess = true
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(true)
+        }
+        wv.webViewClient = createClient()
+        wv.webChromeClient = createChromeClient()
+        wv.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
             DownloadEngine.enqueue(this, url, name)
             snack(R.string.download_added)
         }
+        return wv
     }
 
-    private fun applySettings(): Boolean {
-        val ws = binding.webView.settings
-        val ua = prefs.resolveUa(systemUa)
-        var uaChanged = false
-        if (ua != null && ua != appliedUa) {
-            ws.userAgentString = ua
-            appliedUa = ua
-            uaChanged = true
-        }
-        ws.javaScriptEnabled = prefs.javascript
-        ws.useWideViewPort = prefs.desktop
-        ws.loadWithOverviewMode = !prefs.desktop
-        return uaChanged
+    private fun addTab(isPrivate: Boolean, url: String) {
+        val wv = createWebView(isPrivate)
+        wv.visibility = View.GONE
+        binding.webContainer.addView(wv)
+        val tab = BrowserTab(nextTabId++, isPrivate, wv, url = url)
+        tabs.add(tab)
+        switchTo(tab.id)
+        wv.loadUrl(url)
+        if (isPrivate) snack(R.string.private_notice)
     }
+
+    private fun switchTo(id: Long) {
+        val tab = tabs.firstOrNull { it.id == id } ?: return
+        tabs.forEach {
+            it.webView.visibility = if (it.id == id) View.VISIBLE else View.GONE
+        }
+        currentTabId = id
+        binding.etAddress.setText(tab.url)
+        binding.etAddress.hint = getString(
+            if (tab.isPrivate) R.string.private_hint else R.string.address_hint
+        )
+        binding.privateIndicator.visibility =
+            if (tab.isPrivate) View.VISIBLE else View.GONE
+        binding.btnTabs.text = tabs.size.toString()
+        updateNavButtons()
+        syncPinButton()
+    }
+
+    private fun closeTab(id: Long) {
+        val index = tabs.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val tab = tabs[index]
+        binding.webContainer.removeView(tab.webView)
+        if (tab.isPrivate) clearPrivateData(tab.webView)
+        tab.webView.destroy()
+        tabs.removeAt(index)
+        if (tabs.isEmpty()) {
+            addTab(isPrivate = false, url = prefs.homeUrl())
+        } else if (currentTabId == id) {
+            switchTo(tabs[minOf(index, tabs.size - 1)].id)
+        } else {
+            binding.btnTabs.text = tabs.size.toString()
+        }
+    }
+
+    private fun clearPrivateData(wv: WebView) {
+        runCatching {
+            wv.clearCache(true)
+            wv.clearFormData()
+            wv.clearHistory()
+            wv.clearSslPreferences()
+            WebStorage.getInstance().deleteAllData()
+            CookieManager.getInstance().removeSessionCookies(null)
+        }
+    }
+
+    private fun showTabsDialog() {
+        val dialogBinding = DialogTabsBinding.inflate(layoutInflater)
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.tabs)
+            .setView(dialogBinding.root)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        fun render() {
+            dialogBinding.tabList.removeAllViews()
+            tabs.forEach { tab ->
+                val row = ItemTabBinding.inflate(layoutInflater, dialogBinding.tabList, false)
+                val label = if (tab.isPrivate) {
+                    getString(R.string.private_tab) + " · " +
+                        tab.title.ifEmpty { tab.url.ifEmpty { getString(R.string.home_blank) } }
+                } else {
+                    tab.title.ifEmpty { tab.url.ifEmpty { getString(R.string.home_blank) } }
+                }
+                row.tvTitle.text = label
+                row.tvUrl.text = if (tab.isPrivate) {
+                    getString(R.string.private_hint)
+                } else {
+                    tab.url
+                }
+                row.card.alpha = if (tab.id == currentTabId) 1f else 0.72f
+                row.root.setOnClickListener {
+                    switchTo(tab.id)
+                    dialog.dismiss()
+                }
+                row.btnClose.setOnClickListener {
+                    closeTab(tab.id)
+                    render()
+                }
+                dialogBinding.tabList.addView(row.root)
+            }
+        }
+
+        render()
+        dialogBinding.btnNewTab.setOnClickListener {
+            addTab(isPrivate = false, url = prefs.homeUrl())
+            dialog.dismiss()
+        }
+        dialogBinding.btnNewPrivateTab.setOnClickListener {
+            addTab(isPrivate = true, url = "about:blank")
+            dialog.dismiss()
+        }
+        dialog.show()
+    }
+
+    // ---------- 设置全量生效 ----------
+
+    private fun applyTo(wv: WebView, state: SettingsState, isPrivate: Boolean) {
+        val ws = wv.settings
+        state.ua?.let { if (ws.userAgentString != it) ws.userAgentString = it }
+        ws.javaScriptEnabled = state.javascript
+        ws.useWideViewPort = state.desktop
+        ws.loadWithOverviewMode = !state.desktop
+        @Suppress("DEPRECATION")
+        ws.setSaveFormData(!isPrivate)
+        ws.cacheMode = if (isPrivate) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
+    }
+
+    private fun applySettingsAll(): Boolean {
+        val state = prefs.snapshot(systemUa)
+        val previous = lastSettings
+        lastSettings = state
+        tabs.forEach { applyTo(it.webView, state, it.isPrivate) }
+        runCatching { DownloadEngine.onConfigChanged(this) }
+        return previous != null && (
+            previous.ua != state.ua ||
+                previous.javascript != state.javascript ||
+                previous.desktop != state.desktop
+        )
+    }
+
+    // ---------- WebView 客户端 ----------
 
     private fun createClient(): WebViewClient = object : WebViewClient() {
 
@@ -182,30 +342,38 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-            // 兜底：POST 提交、服务端重定向等不经 shouldOverrideUrlLoading 的主框架导航。
+            val tab = tabOf(view) ?: return
+            tab.url = url
             if (DomainGuard.isPinned() && !DomainGuard.isAllowed(url)) {
                 view.stopLoading()
                 reportBlocked(url)
                 if (view.canGoBack()) view.goBack()
                 return
             }
-            binding.etAddress.setText(url)
-            binding.progress.visibility = View.VISIBLE
-            updateNavButtons()
+            if (tab.id == currentTabId) {
+                binding.etAddress.setText(url)
+                binding.progress.visibility = View.VISIBLE
+                updateNavButtons()
+            }
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            binding.progress.visibility = View.GONE
-            binding.etAddress.setText(url)
-            updateNavButtons()
-            if (url.startsWith("http")) {
-                db.addHistory(url, view.title ?: url)
+            val tab = tabOf(view) ?: return
+            tab.url = url
+            tab.title = view.title ?: url
+            if (!tab.isPrivate && url.startsWith("http")) {
+                db.addHistory(url, tab.title)
             }
-            syncPinButton()
+            if (tab.id == currentTabId) {
+                binding.progress.visibility = View.GONE
+                binding.etAddress.setText(url)
+                updateNavButtons()
+                syncPinButton()
+            }
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-            updateNavButtons()
+            if (tabOf(view)?.id == currentTabId) updateNavButtons()
         }
 
         override fun onReceivedError(
@@ -213,15 +381,22 @@ class MainActivity : AppCompatActivity() {
             request: WebResourceRequest,
             error: WebResourceError
         ) {
-            if (request.isForMainFrame) snack(R.string.page_load_failed)
+            if (request.isForMainFrame && tabOf(view)?.id == currentTabId) {
+                snack(R.string.page_load_failed)
+            }
         }
     }
 
     private fun createChromeClient(): WebChromeClient = object : WebChromeClient() {
 
         override fun onProgressChanged(view: WebView, newProgress: Int) {
+            if (tabOf(view)?.id != currentTabId) return
             binding.progress.progress = newProgress
             if (newProgress >= 100) binding.progress.visibility = View.GONE
+        }
+
+        override fun onReceivedTitle(view: WebView, title: String) {
+            tabOf(view)?.title = title
         }
 
         override fun onShowFileChooser(
@@ -246,6 +421,7 @@ class MainActivity : AppCompatActivity() {
             isUserGesture: Boolean,
             resultMsg: Message
         ): Boolean {
+            val owner = currentTab()
             val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
             val temp = WebView(this@MainActivity)
             temp.webViewClient = object : WebViewClient() {
@@ -255,7 +431,7 @@ class MainActivity : AppCompatActivity() {
                 ): Boolean {
                     val url = request.url.toString()
                     if (DomainGuard.isAllowed(url) && isWebScheme(url)) {
-                        binding.webView.post { loadUrl(url) }
+                        addTab(isPrivate = owner?.isPrivate == true, url = url)
                     } else {
                         reportBlocked(url)
                     }
@@ -317,6 +493,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- 交互 ----------
+
     private fun setupActions() {
         binding.btnGo.setOnClickListener { loadFromInput(binding.etAddress.text.toString()) }
         binding.etAddress.setOnEditorActionListener { _, actionId, event ->
@@ -335,13 +513,15 @@ class MainActivity : AppCompatActivity() {
             syncPinButton()
         }
 
+        binding.btnTabs.setOnClickListener { showTabsDialog() }
+
         binding.btnBack.setOnClickListener {
-            if (binding.webView.canGoBack()) binding.webView.goBack()
+            if (currentTab()?.webView?.canGoBack() == true) currentTab()?.webView?.goBack()
         }
         binding.btnForward.setOnClickListener {
-            if (binding.webView.canGoForward()) binding.webView.goForward()
+            if (currentTab()?.webView?.canGoForward() == true) currentTab()?.webView?.goForward()
         }
-        binding.btnRefresh.setOnClickListener { binding.webView.reload() }
+        binding.btnRefresh.setOnClickListener { currentTab()?.webView?.reload() }
         binding.btnHome.setOnClickListener { loadUrl(prefs.homeUrl()) }
         binding.btnMore.setOnClickListener { showMenu() }
     }
@@ -351,11 +531,15 @@ class MainActivity : AppCompatActivity() {
         popup.menuInflater.inflate(R.menu.menu_main, popup.menu)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                R.id.menu_new_tab -> addTab(false, prefs.homeUrl())
+                R.id.menu_new_private_tab -> addTab(true, "about:blank")
+                R.id.menu_tabs -> showTabsDialog()
                 R.id.menu_add_bookmark -> addBookmark()
                 R.id.menu_bookmarks -> openRecords("bookmarks")
                 R.id.menu_history -> openRecords("history")
                 R.id.menu_downloads -> startActivity(Intent(this, DownloadsActivity::class.java))
-                R.id.menu_settings -> startActivity(Intent(this, SettingsActivity::class.java))
+                R.id.menu_settings ->
+                    settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
                 R.id.menu_share -> shareCurrent()
                 R.id.menu_desktop -> toggleDesktop()
                 R.id.menu_exit -> finish()
@@ -366,9 +550,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBookmark() {
-        val url = binding.webView.url ?: return
+        val tab = currentTab() ?: return
+        if (tab.isPrivate) {
+            snack(R.string.bookmark_blocked_private)
+            return
+        }
+        val url = tab.url
         if (!url.startsWith("http")) return
-        val added = db.addBookmark(url, binding.webView.title ?: url)
+        val added = db.addBookmark(url, tab.title.ifEmpty { url })
         snack(if (added) R.string.bookmark_added else R.string.bookmark_exists)
     }
 
@@ -378,24 +567,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareCurrent() {
-        val url = binding.webView.url ?: return
+        val tab = currentTab() ?: return
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, binding.webView.title ?: "")
-            putExtra(Intent.EXTRA_TEXT, url)
+            putExtra(Intent.EXTRA_SUBJECT, tab.title)
+            putExtra(Intent.EXTRA_TEXT, tab.url)
         }
         startActivity(Intent.createChooser(send, getString(R.string.share_title)))
     }
 
     private fun toggleDesktop() {
         prefs.desktop = !prefs.desktop
-        applySettings()
+        applySettingsAll()
+        tabs.forEach { it.webView.reload() }
         snack(if (prefs.desktop) R.string.desktop_on else R.string.desktop_off)
-        binding.webView.reload()
     }
 
     private fun enablePin() {
-        val base = DomainGuard.pinFrom(binding.webView.url ?: "")
+        val base = DomainGuard.pinFrom(currentTab()?.url ?: "")
         if (base == null) {
             snack(R.string.pin_need_page)
             syncPinButton()
@@ -455,8 +644,10 @@ class MainActivity : AppCompatActivity() {
             reportBlocked(url)
             return
         }
+        val tab = currentTab() ?: return
+        tab.url = url
         binding.etAddress.setText(url)
-        binding.webView.loadUrl(url)
+        tab.webView.loadUrl(url)
         hideKeyboard()
     }
 
@@ -479,8 +670,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateNavButtons() {
-        binding.btnBack.isEnabled = binding.webView.canGoBack()
-        binding.btnForward.isEnabled = binding.webView.canGoForward()
+        val wv = currentTab()?.webView
+        binding.btnBack.isEnabled = wv?.canGoBack() == true
+        binding.btnForward.isEnabled = wv?.canGoForward() == true
     }
 
     private fun hideKeyboard() {
@@ -492,8 +684,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackHandling() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (binding.webView.canGoBack()) {
-                    binding.webView.goBack()
+                val wv = currentTab()?.webView
+                if (wv?.canGoBack() == true) {
+                    wv.goBack()
                 } else {
                     val now = System.currentTimeMillis()
                     if (now - lastBackTime < 2000) {
