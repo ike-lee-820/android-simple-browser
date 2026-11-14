@@ -64,6 +64,15 @@ jobs:
           path: build-output.log
           if-no-files-found: ignore
 
+      - name: Publish APK to dist branch
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk app-release.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f app-release.apk
+          git commit -m "Publish signed APK ${GITHUB_RUN_NUMBER}"
+          git push origin "HEAD:refs/heads/dist" --force
+
       - name: Verify APK signature
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort | tail -n 1)
