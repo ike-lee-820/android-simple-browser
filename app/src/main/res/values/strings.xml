@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">简易浏览器</string>
+
+    <string name="address_hint">输入网址或搜索内容</string>
+    <string name="go">前往</string>
+    <string name="pin_site">固定网页</string>
+    <string name="pinned_to">已固定到 %1$s，仅允许该主域及其子域</string>
+    <string name="pin_off">已解除固定</string>
+    <string name="pin_need_page">当前页没有有效域名，请先打开一个网页</string>
+    <string name="blocked_notice">已拦截越域跳转：%2$s（当前固定到 %1$s）</string>
+    <string name="press_back_again">再按一次返回键退出</string>
+
+    <string name="back">后退</string>
+    <string name="forward">前进</string>
+    <string name="refresh">刷新</string>
+    <string name="home">首页</string>
+    <string name="more">菜单</string>
+
+    <string name="menu_add_bookmark">加入书签</string>
+    <string name="menu_bookmarks">书签</string>
+    <string name="menu_history">历史记录</string>
+    <string name="menu_downloads">下载管理</string>
+    <string name="menu_settings">设置</string>
+    <string name="menu_share">分享当前页</string>
+    <string name="menu_desktop">桌面模式</string>
+    <string name="menu_exit">退出</string>
+    <string name="bookmark_added">已加入书签</string>
+    <string name="bookmark_exists">该网页已在书签中</string>
+    <string name="desktop_on">已切换到桌面模式</string>
+    <string name="desktop_off">已切换到移动模式</string>
+    <string name="share_title">分享网页</string>
+    <string name="page_load_failed">页面加载失败，请检查网络或网址</string>
+
+    <string name="settings">设置</string>
+    <string name="records">记录</string>
+    <string name="downloads">下载管理</string>
+    <string name="label_history">历史</string>
+    <string name="label_bookmark">书签</string>
+    <string name="clear">清空当前列表</string>
+    <string name="clear_finished">清空已完成</string>
+    <string name="delete">删除</string>
+    <string name="open">打开</string>
+    <string name="pause">暂停</string>
+    <string name="resume">继续</string>
+    <string name="empty_records">暂无记录</string>
+    <string name="empty_downloads">暂无下载任务</string>
+
+    <string name="section_home">首页</string>
+    <string name="section_search">搜索引擎</string>
+    <string name="section_ua">User-Agent 定制</string>
+    <string name="section_download">下载并发</string>
+    <string name="section_other">其他</string>
+
+    <string name="home_blank">空白页</string>
+    <string name="home_google">Google</string>
+    <string name="home_goy">goy.com</string>
+    <string name="home_custom">自定义网址</string>
+    <string name="custom_home_hint">自定义首页网址</string>
+
+    <string name="search_google">Google</string>
+    <string name="search_bing">Bing</string>
+    <string name="search_baidu">百度</string>
+    <string name="search_duck">DuckDuckGo</string>
+    <string name="search_custom">自定义模板</string>
+    <string name="custom_search_hint">搜索模板，用 %s 表示关键词</string>
+
+    <string name="ua_default">系统默认</string>
+    <string name="ua_android">Android Chrome</string>
+    <string name="ua_iphone">iPhone Safari</string>
+    <string name="ua_desktop">Windows Chrome</string>
+    <string name="ua_custom">自定义 UA</string>
+    <string name="custom_ua_hint">完整的 User-Agent 字符串</string>
+
+    <string name="max_tasks_hint">同时下载的任务数（默认 8）</string>
+    <string name="parts_hint">每个任务的分片并发数（默认 32）</string>
+    <string name="javascript">启用 JavaScript</string>
+    <string name="save">保存</string>
+    <string name="saved">设置已保存</string>
+    <string name="invalid_number">并发数必须是 1 到 64 之间的整数</string>
+
+    <string name="download_added">已加入下载队列</string>
+    <string name="download_channel_name">下载通知</string>
+    <string name="download_done">下载完成</string>
+    <string name="download_failed">下载失败</string>
+    <string name="status_queued">排队中</string>
+    <string name="status_running">下载中</string>
+    <string name="status_paused">已暂停</string>
+    <string name="status_done">已完成</string>
+    <string name="status_failed">失败</string>
+    <string name="cannot_open_file">找不到可以打开该文件的程序</string>
+</resources>
