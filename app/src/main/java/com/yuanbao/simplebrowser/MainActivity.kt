@@ -3,6 +3,7 @@ package com.yuanbao.simplebrowser
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
@@ -28,6 +29,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.yuanbao.simplebrowser.core.BrowserDb
@@ -49,7 +51,6 @@ class MainActivity : AppCompatActivity() {
     private var systemUa: String? = null
     private var appliedUa: String? = null
     private var lastBackTime = 0L
-    private var pinSyncing = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val fileChooserLauncher =
@@ -78,7 +79,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
 
         prefs = Prefs(this)
         db = BrowserDb(this)
@@ -88,7 +88,7 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         setupActions()
         setupBackHandling()
-        syncPinSwitch()
+        syncPinButton()
 
         val incoming = intent?.data?.toString()
         if (savedInstanceState == null) {
@@ -197,12 +197,11 @@ class MainActivity : AppCompatActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             binding.progress.visibility = View.GONE
             binding.etAddress.setText(url)
-            supportActionBar?.subtitle = view.title
             updateNavButtons()
             if (url.startsWith("http")) {
                 db.addHistory(url, view.title ?: url)
             }
-            syncPinSwitch()
+            syncPinButton()
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
@@ -223,10 +222,6 @@ class MainActivity : AppCompatActivity() {
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             binding.progress.progress = newProgress
             if (newProgress >= 100) binding.progress.visibility = View.GONE
-        }
-
-        override fun onReceivedTitle(view: WebView, title: String) {
-            supportActionBar?.subtitle = title
         }
 
         override fun onShowFileChooser(
@@ -335,9 +330,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.switchPin.setOnCheckedChangeListener { _, checked ->
-            if (pinSyncing) return@setOnCheckedChangeListener
-            if (checked) enablePin() else disablePin()
+        binding.btnPin.setOnClickListener {
+            if (DomainGuard.isPinned()) disablePin() else enablePin()
+            syncPinButton()
         }
 
         binding.btnBack.setOnClickListener {
@@ -403,7 +398,7 @@ class MainActivity : AppCompatActivity() {
         val base = DomainGuard.pinFrom(binding.webView.url ?: "")
         if (base == null) {
             snack(R.string.pin_need_page)
-            syncPinSwitch()
+            syncPinButton()
             return
         }
         prefs.pinnedBase = base
@@ -416,10 +411,24 @@ class MainActivity : AppCompatActivity() {
         snack(R.string.pin_off)
     }
 
-    private fun syncPinSwitch() {
-        pinSyncing = true
-        binding.switchPin.isChecked = DomainGuard.isPinned()
-        pinSyncing = false
+    private fun syncPinButton() {
+        val pinned = DomainGuard.isPinned()
+        binding.btnPin.setImageResource(
+            if (pinned) R.drawable.ic_lock_closed_24 else R.drawable.ic_lock_open_24
+        )
+        val tint = MaterialColors.getColor(
+            binding.btnPin,
+            if (pinned) com.google.android.material.R.attr.colorPrimary
+            else android.R.attr.colorControlNormal
+        )
+        binding.btnPin.imageTintList = ColorStateList.valueOf(tint)
+        val description = if (pinned) {
+            getString(R.string.pinned_to, DomainGuard.base() ?: "")
+        } else {
+            getString(R.string.pin_site)
+        }
+        binding.btnPin.contentDescription = description
+        binding.btnPin.tooltipText = description
     }
 
     private fun loadFromInput(raw: String) {
