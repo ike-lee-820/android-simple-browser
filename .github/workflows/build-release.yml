@@ -47,13 +47,24 @@ jobs:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('1.0.{0}', github.run_number) }}
         run: |
+          set -o pipefail
           chmod +x gradlew
           if [ -f gradle/wrapper/gradle-wrapper.jar ]; then
-            ./gradlew :app:assembleRelease --no-daemon --stacktrace
+            ./gradlew :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build-output.log
           else
-            gradle :app:assembleRelease --no-daemon --stacktrace
+            gradle :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build-output.log
           fi
           ls -l app/build/outputs/apk/release/
+
+      - name: Publish build log tail on failure
+        if: failure()
+        run: |
+          {
+            echo '### Build log tail'
+            echo '```text'
+            tail -n 400 build-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify APK signature
         run: |
